@@ -86,7 +86,21 @@ installGlobalDeps() {
         else
             URL=https://raw.githubusercontent.com/c9/install
         fi    
-        $DOWNLOAD $URL/master/install.sh | bash
+        if [ "$NO_GLOBAL_INSTALL" ]; then
+            if ! dpkg --list sqlite3 > /dev/null ; then
+                echo "Install sqlite3 package first"
+                exit 1
+            fi
+            SCRIPT=link.sh
+        else
+            SCRIPT=install.sh
+        fi
+        $DOWNLOAD $URL/master/$SCRIPT | bash
+        if [ "$NO_GLOBAL_INSTALL" ]; then
+            pushd $C9_DIR/bin
+            ln -s `which sqlite3` sqlite3
+            popd
+        fi
     fi
 }
 
