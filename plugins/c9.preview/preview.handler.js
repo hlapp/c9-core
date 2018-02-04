@@ -165,9 +165,10 @@ define(function(require, exports, module) {
                         path: parsedUrl.path,
                         hostname: parsedUrl.hostname,
                         port: parsedUrl.port,
-                        headers: req.headers
+                        headers: req.headers,
+                        rejectUnauthorized: !options.selfSignedSSL
                     }, function(request) {
-                        if (request.statusCode >= 400)
+                        if (request.statusCode >= 400 || request.headers["content-type"] == "text/x-error")
                             handleError(request);
                         else if (isDir)
                             serveListing(request);

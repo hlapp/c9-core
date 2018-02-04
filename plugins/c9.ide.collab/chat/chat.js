@@ -35,7 +35,7 @@ define(function(require, exports, module) {
             index: 200,
             caption: "Group Chat",
             textselect: true,
-            style: "flex:1;-webkit-flex:1"
+            style: "flex:1;"
         });
 
         // var emit = plugin.getEmitter();
@@ -98,11 +98,9 @@ define(function(require, exports, module) {
                 if (accessInfo.private && (!accessInfo.member || accessInfo.pending))
                     return console.warn("Don't have read access - You can't use chat");
                 var chatHistory = workspace.chatHistory || [];
-                chatHistory.forEach(function(msg) {
-                    addMessage(msg, msg.increment);
-                });
+                chatHistory.forEach(addMessage);
                 scrollDown();
-                chatCounter.innerHTML = chatHistory.length;
+                chatCounter.textContent = chatHistory.length;
             }
 
             chatInput.ace.commands.addCommands([
@@ -275,8 +273,8 @@ define(function(require, exports, module) {
             }
 
             if (msg.increment) {
-                var count = Number(chatCounter.innerHTML);
-                chatCounter.innerHTML = count + 1;
+                var count = Number(chatCounter.textContent);
+                chatCounter.textContent = count + 1;
             }
 
             var inputFocussed = chatInput && chatInput.ace.isFocused();

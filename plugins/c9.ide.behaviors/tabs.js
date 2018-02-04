@@ -32,15 +32,13 @@ define(function(require, exports, module) {
         var mnuContext, mnuEditors, mnuTabs;
         var menuItems = [], menuClosedItems = [];
         
-        var accessedTab = 0;
-        
         var paneList = [];
         var accessedPane = 0;
         
         var cycleKeyPressed, changedTabs, unchangedTabs, dirtyNextTab, dirtyNextPane;
 
         var ACTIVEPAGE = function() { return tabs.focussedTab; };
-        var ACTIVEPATH = function() { var tab = tabs.focussedTab; return tab && (tab.path || tab.relatedPath || tab.editor.getPathAsync); };
+        var ACTIVEPATH = function() { var tab = mnuContext.$tab || tabs.focussedTab; return tab && (tab.path || tab.relatedPath || tab.editor.getPathAsync); };
         var MORETABS = function() { return tabs.getTabs().length > 1; };
         var MORETABSINPANE = function() { return tabs.focussedTab && tabs.focussedTab.pane.getTabs().length > 1; };
         var MOREPANES = function() { return tabs.getPanes().length > 1; };
@@ -258,12 +256,14 @@ define(function(require, exports, module) {
             
             menus.addItemByPath("Window/Tabs/~", new apf.label({
                 class: "splits",
-                caption: "<span class='nosplit'></span>"
-                    + "<span class='twovsplit'></span>"
-                    + "<span class='twohsplit'></span>"
-                    + "<span class='foursplit'></span>"
-                    + "<span class='threeleft'></span>"
-                    + "<span class='threeright'></span>",
+                caption: [
+                    ["span", { class: "nosplit" }],
+                    ["span", { class: "twovsplit" }],
+                    ["span", { class: "twohsplit" }],
+                    ["span", { class: "foursplit" }],
+                    ["span", { class: "threeleft" }],
+                    ["span", { class: "threeright" }],
+                ],
                 onclick: function(e) {
                     var span = e.htmlEvent.target;
                     if (!span || span.tagName != "SPAN") return;
@@ -432,7 +432,7 @@ define(function(require, exports, module) {
 
             menus.addItemByPath("View/Layout/Split 1:2", new ui.item({
                 command: "threeright"
-            }), 400, mnuContext, plugin);            
+            }), 400, mnuContext, plugin);
 
             menus.addItemByPath("View/Layout/Split 2:1", new ui.item({
                 command: "threeleft"
@@ -618,11 +618,9 @@ define(function(require, exports, module) {
                     cycleKeyPressed = false;
     
                     if (dirtyNextTab) {
-                        accessedTab = 0;
-    
                         var tab = tabs.focussedTab;
                         var accessList = tab.pane.meta.accessList;
-                        if (accessList[accessedTab] != tab) {
+                        if (accessList[0] != tab) {
                             accessList.remove(tab);
                             accessList.unshift(tab);
                             accessList.changed = true;
@@ -643,7 +641,7 @@ define(function(require, exports, module) {
                             settings.save();
                         }
     
-                        dirtyNextTab = false;
+                        dirtyNextPane = false;
                     }
                 }
             });
@@ -825,40 +823,36 @@ define(function(require, exports, module) {
             closeallbutme(tab, pages.slice(0, currIdx));
         }
     
-        function nexttab() {
+        function nexttab(dir, keepOrder) {
             if (tabs.getTabs().length === 1)
                 return;
             
             var tab = tabs.focussedTab;
             var accessList = tab.pane.meta.accessList;
             
-            if (++accessedTab >= accessList.length)
-                accessedTab = 0;
-    
-            var next = accessList[accessedTab];
+            var index = accessList.indexOf(tab);
+            index += dir || 1;
+            
+            if (index >= accessList.length)
+                index = 0;
+            else if (index < 0)
+                index = accessList.length - 1;
+            
+            var next = accessList[index];
             if (typeof next != "object" || !next.pane.visible)
-                return nexttab();
-            tabs.focusTab(next, null, true);
-    
-            dirtyNextTab = true;
+                return nexttab(dir, keepOrder);
+            if (keepOrder && cycleKeyPressed == false) {
+                cycleKeyPressed = true;
+                tabs.focusTab(next, null, true);
+                cycleKeyPressed = false;
+            } else {
+                tabs.focusTab(next, null, true);
+            }
+            dirtyNextTab = !keepOrder;
         }
     
-        function previoustab() {
-            if (tabs.getTabs().length === 1)
-                return;
-                
-            var tab = tabs.focussedTab;
-            var accessList = tab.pane.meta.accessList;
-    
-            if (--accessedTab < 0)
-                accessedTab = accessList.length - 1;
-    
-            var next = accessList[accessedTab];
-            if (typeof next != "object" || !next.pane.visible)
-                return previoustab();
-            tabs.focusTab(next, null, true);
-    
-            dirtyNextTab = true;
+        function previoustab(dir, keepOrder) {
+            nexttab(dir || -1, keepOrder)
         }
     
         function nextpane() {

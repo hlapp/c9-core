@@ -32,6 +32,7 @@ describe("client config consistency", function() {
     }).concat(
         fs.readdirSync(root + "/configs/ide").map(function(n) { return "ide/" + n })
     ).forEach(function(name) {
+        if (!/\.js$/.test(name)) return;
         it("should not have missing plugins in config " + name, function(next) {
             fetchClientOptions(function(err, clientOptions) {
                 if (err) return next();
@@ -99,7 +100,7 @@ describe("client config consistency", function() {
             }
         });
         
-        var provides = {"auth.bootstrap": 1, "hub": 1};
+        var provides = { "auth.bootstrap": 1, "hub": 1, "app": 1 };
         var paths = {};
         clientPlugins.forEach(function(p) {
             if (paths[p.packagePath]) {

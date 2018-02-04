@@ -1039,7 +1039,7 @@ var Store = (function () {
 // This object should have the following structure:
 //
 //     { <document id> : { <client id> : true } }
-var documents = {};
+var documents = Object.create(null);
 
 // This object should have the following structure:
 //
@@ -1051,14 +1051,14 @@ var watchers;
 //     { <client id> : <client> }
 var clients;
 
-var lastSaveStarts = {};
+var lastSaveStarts = Object.create(null);
 
 // SQLite doesn't provide atomic instructions or locks
 // So this variable expresses in-process locks
 // Used to block concurrent edit updates while the document is being processed
 //
 //     { <key or document_id> : [{Function}] }
-var locks = {};
+var locks = Object.create(null);
 function lock(key, callback) {
     if (!locks[key]) {
         locks[key] = [];
@@ -1951,10 +1951,13 @@ function syncDocument(docId, doc, client, forceSync, callback) {
 
             var fsHash = hashString(normContents);
             
+            if (doc && typeof doc.contents != "string" && doc.contents)
+                doc.contents = doc.contents.toString(); // because it can be a buffer
+            
             // HACK: fsHash from database is unreliable (https://github.com/c9/newclient/issues/3980)
             if (doc)
                 doc.fsHash = hashString(doc.contents);
-
+            
             if (!doc) {
                 logVerbose("[vfs-collab] SYNC: Creating document:", docId, fsHash);
 
@@ -2197,14 +2200,14 @@ function handleSaveFile(userIds, client, data) {
                 doSaveDocument(docId, doc, userId, !data.silent, function (err, result) {
                     logVerbose("[vfs-collab] Saving took", Date.now() - st, "ms - time is now: " + Date.now() + " file:", docId, !err);
                     if (err) {
-                        client.send({		
-                            type: "POST_PROCESSOR_ERROR",		
-                            data: {		
-                                code: err.code,		
-                                stderr: result && result.stderr,		
-                                docId: docId,		
-                            }		
-                        });		
+                        client.send({
+                            type: "POST_PROCESSOR_ERROR",
+                            data: {
+                                code: err.code,
+                                stderr: err.stderr,
+                                docId: docId,
+                            }
+                        });
                         return done(err);
                     }
                     
@@ -2223,40 +2226,27 @@ function handleSaveFile(userIds, client, data) {
 
 function execPostProcessor(absPath, docId, doc, fileContents, client, postProcessor, callback) {
     localfsAPI.writeToWatchedFile(absPath, function(afterWrite) {
-        localfsAPI.execFile(
-            postProcessor.command,
-            { args: postProcessor.args.map(function(a) { return a.replace(/\$file/g, absPath); }) },
-            function(err, result) {
-                if (err) return done(err);
-                
-                afterWrite(function() {
-                    Fs.readFile(absPath, "utf8", done);
-                });
-            }
-        );
-    });
-    
-    function done(err, result) {
-        var newFileContents = result && result.toString().replace(/\n/g, doc.newLineChar || DEFAULT_NL_CHAR_FILE);
-        if (!newFileContents || newFileContents === fileContents) {
+        localfsAPI.execFile(postProcessor.command, {
+            args: postProcessor.args.map(function(a) { return a.replace(/\$file/g, absPath); }),
+            cwd: Path.dirname(absPath),
+        },
+        function(err, result) {
             if (err) {
                 client.send({
                     type: "POST_PROCESSOR_ERROR",
                     data: {
                         code: err.code,
-                        stderr: result && result.stderr,
+                        stderr: err.stderr,
                         docId: docId,
                     }
                 });
-                return callback();
             }
-            return callback();
-        }
-        
-        doc.contents = fileContents;
-        
-        syncDocument(docId, doc, null, false, callback);
-    }
+            
+            syncDocument(docId, doc, null, true, function() {
+                afterWrite(callback)
+            });
+        });
+    });
 }
 
 /**
@@ -2834,7 +2824,7 @@ function createServer() {
                     "Note that visitors of private workspaces can't use collab features");
 
             client.userIds = userIds;
-            client.openDocIds = {};
+            client.openDocIds = Object.create(null);
             clients[userIds.clientId] = client;
             // logVerbose("[vfs-collab] Server handshaked", Object.keys(clients).length);
 
@@ -2948,9 +2938,9 @@ function initSocket(userIds, callback) {
                 server.collabInited = false;
 
                 // init server state
-                documents = {};
-                watchers = {};
-                clients = {};
+                documents = Object.create(null);
+                watchers = Object.create(null);
+                clients = Object.create(null);
 
                 // Check server installation, init the server and then connect the client to the inited collab server
                 installServer(function (err) {

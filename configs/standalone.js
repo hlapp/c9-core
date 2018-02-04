@@ -41,18 +41,22 @@ module.exports = function(config, optimist) {
             .boolean("inProcessLocalFs")
             .describe("inProcessLocalFs", "Whether to run localfs in same process for debugging.")
             .default("inProcessLocalFs", config.inProcessLocalFs)
-            .boolean("useBrowserCache");
+            .boolean("useBrowserCache")
+            .describe("useBrowserCache", "Use window.caches api if available for faster loading, requires https://")
+            .describe("secure", "path to file containing ssl certificate (can be generated using scripts/create-cert.sh)");
     }
-    
+
+    require("./utils/ssl")(config, optimist);
+
     var argv = optimist.argv;
     if (argv.help)
         return null;
-    
+
     var testing = argv.t;
     var baseProc = path.normalize(testing
         ? __dirname + "/../plugins/c9.fs/mock"
         : argv.w || (__dirname + "/../"));
-    
+
     // if (testing && !argv["setting-path"])
     //     argv["setting-path"] = "/tmp/.c9";
 
@@ -78,6 +82,9 @@ module.exports = function(config, optimist) {
     if (argv.hosted)
         config.client_config = "default-hosted";
     
+    if (!argv.hosted)
+        config.sourceDir = path.dirname(__dirname);
+    
     config.workspaceDir = baseProc;
     config.settingDir = argv["setting-path"];
     config.projectName = path.basename(baseProc);
@@ -88,7 +95,7 @@ module.exports = function(config, optimist) {
         config.startBridge = startBridge;
     
     if (testing && argv.k)
-        require("child_process").exec("tmux -L cloud91.9 kill-server", function(){});
+        require("child_process").exec("tmux -L cloud91.9 kill-server", function() {});
 
     var isLocalhost = host == "localhost" || host == "127.0.0.1";
     if (!/:/.test(argv.auth) && !isLocalhost) {
@@ -113,7 +120,8 @@ module.exports = function(config, optimist) {
             port: port,
             host: host,
             websocket: true,
-            showRealIP: !config.mode
+            showRealIP: !config.mode,
+            secure: config.secure,
         },
         {
             packagePath: "connect-architect/connect.basicauth",
@@ -185,7 +193,10 @@ module.exports = function(config, optimist) {
         },
         "./c9.vfs.server/vfs.server",
         "./c9.error/logger.raygun_noop",
-        "./c9.preview/preview.handler",
+        {
+            packagePath: "./c9.preview/preview.handler",
+            selfSignedSSL: config.secure
+        },
         "./c9.vfs.server/cache",
         "./c9.vfs.server/download",
         "./c9.vfs.server/filelist",

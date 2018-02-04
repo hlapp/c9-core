@@ -10,8 +10,7 @@
  * themselves with the worker.
  */
 define(function(require, exports, module) {
-
-require("ace/lib/es5-shim");
+// TODO fix build script to check for deps in ace/worker/worker.js    
 require("ace/lib/es6-shim");
 
 var oop = require("ace/lib/oop");
@@ -826,9 +825,9 @@ function endTime(t, message, indent) {
         var posInPart = syntaxDetector.posToRegion(part.region, pos);
         this.parse(part, function(ast) {
             if (!ast)
-                return callHandlers(ast, null, posInPart);
+                return callHandlers(ast, null);
             _self.findNode(ast, pos, function(currentNode) {
-                callHandlers(ast, currentNode, posInPart);
+                callHandlers(ast, currentNode);
             });
         }, true, true);
         

@@ -15,7 +15,6 @@ define(function(require, exports, module) {
         var api = imports.api;
         var info = imports.info;
         var util = imports.util;
-        var _ = require("lodash");
         
         var join = require("path").join;
         
@@ -44,13 +43,14 @@ define(function(require, exports, module) {
         var TEMPLATE = options.template || { user: {}, project: {}, state: {}};
         var INTERVAL = 1000;
         var PATH = {
-            "project": c9.toInternalPath(options.projectConfigPath || "/.c9") + "/project.settings",
-            "user": c9.toInternalPath(options.userConfigPath || "~/.c9") + "/user.settings",
-            "state": c9.toInternalPath(options.stateConfigFilePath || (options.stateConfigPath || "/.c9") + "/state.settings")
+            "project": util.normalizePath(c9.toInternalPath(options.projectConfigPath || "/.c9")) + "/project.settings",
+            "user": util.normalizePath(c9.toInternalPath(options.userConfigPath || "~/.c9")) + "/user.settings",
+            "state": util.normalizePath(c9.toInternalPath(options.stateConfigFilePath || (options.stateConfigPath || "/.c9") + "/state.settings"))
         };
         var KEYS = Object.keys(PATH);
         
         var saveToCloud = {};
+        var defaults = {};
         var model = {};
         var cache = {};
         var diff = 0; // TODO should we allow this to be undefined and get NaN in timestamps?
@@ -68,7 +68,7 @@ define(function(require, exports, module) {
             if (!json) {
                 // Load from TEMPLATE
                 if (options.settings == "defaults" || testing)
-                    json = TEMPLATE;
+                    json = util.cloneObject(TEMPLATE);
                 // Load from parsed settings in the index file
                 else if (options.settings) {
                     json = options.settings;
@@ -81,19 +81,25 @@ define(function(require, exports, module) {
                             try {
                                 json[type] = JSON.parse(json[type]);
                             } catch (e) {
-                                json[type] = TEMPLATE[type];
+                                json[type] = util.cloneObject(TEMPLATE[type]);
                             }
                         }
                     }
                 }
                 
                 var count = KEYS.length;
+                var hasJSON = json;
+                if (!json) 
+                    json = {};
                 
                 KEYS.forEach(function(type) {
-                    if (!skipCloud[type] && json)
+                    if (!skipCloud[type] && hasJSON)
                         return --count;
-                    fs.readFile(PATH[type], function(err, data) {
-                        if (!json) json = {};
+                    if (type == "state" && debugMode)
+                        return done(null, localStorage["debugState" + c9.projectName]);
+                    fs.readFile(PATH[type], done);
+                    
+                    function done(err, data) {
                         try {
                             json[type] = err ? {} : JSON.parse(data);
                         } catch (e) {
@@ -104,7 +110,7 @@ define(function(require, exports, module) {
                         
                         if (--count === 0)
                             loadSettings(json);
-                    });
+                    }
                 });
                 if (count > 0)
                     return;
@@ -214,59 +220,41 @@ define(function(require, exports, module) {
             dirty = false;
         }
     
-        function read(json, isReset) {
+        function read(json, isReset, resetAll) {
+            if (testing || resetAll)
+                json = util.cloneObject(TEMPLATE);
+            
+            KEYS.forEach(function(type) {
+                if (json[type])
+                    model[type] = json[type];
+            });
+            
+            if (resetSettings) {
+                var query = (resetSettings == 1 
+                    ? "user|state" : resetSettings).split("|");
+                resetSettings = false;
+                query.forEach(function(type) {
+                    model[type] = util.cloneObject(TEMPLATE[type]);
+                });
+            }
+            
+            var hadError = true;
             try {
-                if (testing) throw "testing";
-                
-                KEYS.forEach(function(type) {
-                    if (json[type])
-                        model[type] = json[type];
-                });
-                
-                if (resetSettings) {
-                    var query = (resetSettings == 1 
-                        ? "user|state" : resetSettings).split("|");
-                    query.forEach(function(type) {
-                        model[type] = TEMPLATE[type];
-                    });
-                }
-                
-            } catch (e) {
-                KEYS.forEach(function(type) {
-                    model[type] = TEMPLATE[type];
-                });
-            }
-    
-            if (!c9.debug && !testing) {
-                try {
-                    emit("read", {
-                        model: model,
-                        ext: plugin,
-                        reset: isReset
-                    });
-                } catch (e) {
-                    console.error("Error loading settings, reseting to defaults");
-                    console.error(e);
-                    fs.writeFile(PATH.project 
-                        + ".broken", JSON.stringify(json), function() {});
-    
-                    KEYS.forEach(function(type) {
-                        model[type] = TEMPLATE[type];
-                    });
-    
-                    emit("read", {
-                        model: model,
-                        ext: plugin,
-                        reset: isReset
-                    });
-                }
-            }
-            else {
                 emit("read", {
                     model: model,
                     ext: plugin,
                     reset: isReset
                 });
+                hadError = false;
+            } finally {
+                // we do not want to catch the error to not hide it during development
+                if (hadError && !resetAll && !c9.debug && !testing) {
+                    fs.writeFile(PATH.project + ".broken",
+                        JSON.stringify(json, null, 4), function() {});
+                    console.error("Error loading settings, reseting to defaults");
+                    console.error("Old settings, are saved to " + PATH.project + ".broken");
+                    return read(json, isReset, true);
+                }
             }
             
             if (inited)
@@ -329,7 +317,7 @@ define(function(require, exports, module) {
         }
 
         function setDefaults(path, attr) {
-            var node = getNode(path) || set(path, {}, true, true) && getNode(path);
+            var node = getNode(path, true) || set(path, {}, true, true) && getNode(path, true);
             var changed;
             
             attr.forEach(function(a) {
@@ -346,17 +334,14 @@ define(function(require, exports, module) {
         }
         
         function update(type, json, ud) {
-            // Do nothing if they are the same
-            if (_.isEqual(model[type], json))
-                return;
-            
             userData = ud;
             
             // Compare key/values (assume source has same keys as target)
             (function recur(source, target, base) {
                 for (var prop in source) {
                     if (prop == "json()") {
-                        setJson(base, source[prop]);
+                        if (!target || !isEqual(source[prop], target[prop]))
+                            setJson(base, source[prop]);
                     }
                     else if (typeof source[prop] == "object") {
                         if (!target[prop]) target[prop] = {};
@@ -369,6 +354,30 @@ define(function(require, exports, module) {
             })(json, model[type], type);
             
             userData = null;
+        }
+        
+        function isEqual(a, b) {
+            var typeA = typeof a;
+            var typeB = typeof b;
+            if (typeA != typeB) return false;
+            if (!a || typeA !== "object")
+                return a === b;
+            if (Array.isArray(a)) {
+                if (!Array.isArray(b)) return false;
+                if (a.length != b.length) return false;
+                for (var i = 0; i < a.length; i++) {
+                    if (!isEqual(a[i], b[i])) return false;
+                }
+            }
+            else {
+                var aKeys = Object.keys(a);
+                var bKeys = Object.keys(b);
+                if (aKeys.length != bKeys.length) return false;
+                for (var i = 0; i < aKeys.length; i++) {
+                    if (!isEqual(a[aKeys[i]], b[aKeys[i]])) return false;
+                }
+            }
+            return true;
         }
         
         function setNode(query, value) {
@@ -385,10 +394,13 @@ define(function(require, exports, module) {
                 key = "json()";
             }
             
-            var hash = model;
+            var hash = isDefault ? defaults : model;
+            var defaultHash = defaults;
             if (!parts.every(function(part) {
-                if (!hash[part] && checkDefined) return false;
+                if (!hash[part] && checkDefined && !defaultHash[part])
+                    return false;
                 hash = hash[part] || (hash[part] = {});
+                defaultHash = defaultHash[part] || {};
                 return hash;
             })) {
                 console.warn("Setting non defined query: ", query);
@@ -451,34 +463,40 @@ define(function(require, exports, module) {
         
         function getNumber(query) {
             var double = get(query);
-            return parseFloat(double, 10);
+            return parseFloat(double);
         }
         
-        function getNode(query) {
-            return get(query, true);
+        function getNode(query, isDefault) {
+            return get(query, true, isDefault);
         }
         
-        function get(query, isNode) {
+        function getUnsafe(query, isNode, isDefault) {
             var parts = query.split("/");
             if (!isNode && parts[parts.length - 1].charAt(0) !== "@")
                 parts.push("json()");
             
-            var hash = model;
+            var hash = isDefault == true ? {} : model;
             parts.every(function(part) { 
                 hash = hash[part];
                 return hash;
             });
-            
+            if (hash === undefined) {
+                hash = isDefault == false ? {} : defaults;
+                parts.every(function(part) { 
+                    hash = hash[part];
+                    return hash;
+                });
+            }
+            return hash;
+        }
+        
+        function get(query, isNode, isDefault) {
+            var hash = getUnsafe(query, isNode, isDefault);
             return hash === undefined ? "" : hash;
         }
         
         function exist(query) {
-            var parts = query.split("/");
-            var hash = model;
-            return parts.every(function(part) { 
-                hash = hash[part];
-                return hash;
-            });
+            return getUnsafe(query, true) != undefined;
         }
         
         function reset(query) {
@@ -486,10 +504,10 @@ define(function(require, exports, module) {
             
             var info = {};
             query.split("|").forEach(function(type) {
-                info[type] = TEMPLATE[type];
+                info[type] = util.cloneObject(TEMPLATE[type]);
             });
             
-            read(model, true);
+            read(info, true);
             saveToFile();
         }
     
